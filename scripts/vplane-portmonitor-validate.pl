@@ -71,14 +71,13 @@ use lib "/opt/vyatta/share/perl5/";
 use Vyatta::Config;
 use Vyatta::Interface;
 use Vyatta::SwitchConfig qw(is_hw_interface);
-use Vyatta::Platform
-  qw(get_platform_feature_limits is_supported_platform_feature);
+use Vyatta::Platform     qw(get_platform_feature_limits is_supported_platform_feature);
 
-my $pmconfig     = new Vyatta::Config("service portmonitor");
-my $dpconfig     = new Vyatta::Config("interfaces dataplane");
-my $vhconfig     = new Vyatta::Config("interfaces vhost");
-my $bondconfig   = new Vyatta::Config("interfaces bonding");
-my $erspanconfig = new Vyatta::Config("interfaces erspan");
+my $pmconfig     = Vyatta::Config->new("service portmonitor");
+my $dpconfig     = Vyatta::Config->new("interfaces dataplane");
+my $vhconfig     = Vyatta::Config->new("interfaces vhost");
+my $bondconfig   = Vyatta::Config->new("interfaces bonding");
+my $erspanconfig = Vyatta::Config->new("interfaces erspan");
 
 my %physrcs             = ();
 my %vifsrcs             = ();
@@ -102,22 +101,21 @@ my $src_rx_hw_count = 0;
 
 sub check_phyintf_already_configured {
     my ( $session, $interface ) = @_;
-    die
-"Interface $interface for session $session is already configured as source interface\n"
+    die "Interface $interface for session $session is already configured as source interface\n"
       if exists $physrcs{$interface};
     die
-"Interface $interface for session $session is already configured as destination interface\n"
+      "Interface $interface for session $session is already configured as destination interface\n"
       if exists $phydests{$interface};
+    return;
 }
 
 sub check_vif_already_configured {
     my ( $session, $interface ) = @_;
-    die
-"vif $interface for session $session is already configured as source interface\n"
+    die "vif $interface for session $session is already configured as source interface\n"
       if exists $vifsrcs{$interface};
-    die
-"vif $interface for session $session is already configured as destination interface\n"
+    die "vif $interface for session $session is already configured as destination interface\n"
       if exists $vifdests{$interface};
+    return;
 }
 
 sub check_platform_allowed_hw_source {
@@ -129,8 +127,7 @@ sub check_platform_allowed_hw_source {
 
     if ( $type ne 'span' ) {
         push( @allmsg,
-"Session $session with hardware-switched $source can only be of type span\n"
-        );
+            "Session $session with hardware-switched $source can only be of type span\n" );
         $ret = 1;
     }
     if ( ( $direction eq 'both' ) || ( $direction eq 'rx' ) ) {
@@ -141,58 +138,54 @@ sub check_platform_allowed_hw_source {
         push @{ $src_tx_hw_sessions{$session} }, $source;
         $src_tx_hw_count++;
     }
-    if ( keys %src_rx_hw_sessions gt $plat_limits{hw_rx_sess_count} ) {
+    if ( keys %src_rx_hw_sessions > $plat_limits{hw_rx_sess_count} ) {
         push( @allmsg,
 "Hardware-switched $source not allowed in session $session, max hw-rx session limit $plat_limits{hw_rx_sess_count}\n"
         );
         $ret = 1;
     }
-    if ( keys %src_tx_hw_sessions gt $plat_limits{hw_tx_sess_count} ) {
+    if ( keys %src_tx_hw_sessions > $plat_limits{hw_tx_sess_count} ) {
         push( @allmsg,
 "Hardware-switched $source not allowed in session $session, max hw-tx session limit $plat_limits{hw_tx_sess_count}\n"
         );
         $ret = 1;
     }
 
-    my $total_hw_sess =
-      ( keys %src_rx_hw_sessions ) + ( keys %src_tx_hw_sessions );
+    my $total_hw_sess = ( keys %src_rx_hw_sessions ) + ( keys %src_tx_hw_sessions );
 
-    if ( $total_hw_sess gt $plat_limits{hw_sess_count} ) {
+    if ( $total_hw_sess > $plat_limits{hw_sess_count} ) {
         push( @allmsg,
 "Hardware-switched $source not allowed in session $session, max hw session limit $plat_limits{hw_sess_count}\n"
         );
         $ret = 1;
     }
-    if ( $src_rx_hw_count gt $plat_limits{hw_rx_src_count} ) {
+    if ( $src_rx_hw_count > $plat_limits{hw_rx_src_count} ) {
         push( @allmsg,
 "Hardware-switched $source not allowed in session $session, max hw-rx interface limit $plat_limits{hw_rx_src_count}\n"
         );
         $ret = 1;
 
     }
-    if ( $src_tx_hw_count gt $plat_limits{hw_tx_src_count} ) {
+    if ( $src_tx_hw_count > $plat_limits{hw_tx_src_count} ) {
         push( @allmsg,
 "Hardware-switched $source not allowed in session $session, max hw-tx interface limit $plat_limits{hw_tx_src_count}\n"
         );
         $ret = 1;
     }
-    die "@allmsg" if ( $ret eq 1 );
+    die join( q{}, @allmsg ) if $ret == 1;    ## no critic (ErrorHandling::RequireCarping) reason: each message ends in a newline
+    return;
 }
 
 sub check_valid_dp_intf {
     my ( $session, $interface, $type ) = @_;
-    die
-      "Interface $interface is not a valid interface configured on the system\n"
+    die "Interface $interface is not a valid interface configured on the system\n"
       unless ( Vyatta::Interface::is_valid_intf_cfg($interface) );
-    my $intf = new Vyatta::Interface($interface);
-    die
-"Unknown interface name/type: $interface, needs to be valid dataplane interface\n"
+    my $intf = Vyatta::Interface->new($interface);
+    die "Unknown interface name/type: $interface, needs to be valid dataplane interface\n"
       unless defined($intf);
 
-
     # Check if platform supports portmonitor in hardware only
-    my $hw_only = is_supported_platform_feature( "portmonitor.hardware-only",
-        undef, undef );
+    my $hw_only = is_supported_platform_feature( "portmonitor.hardware-only", undef, undef );
 
     # If portmonitor feature is supported in hardware only, both source and destination
     # interfaces should be switched in hardware. When hardware only support, source
@@ -201,29 +194,28 @@ sub check_valid_dp_intf {
     if ($hw_only) {
         die "$interface of session $session is not a hardware interface\n"
           if ( !is_hw_interface($interface) );
-        die
-"Hardware interface $interface of session $session is not a valid source interface\n"
+        die "Hardware interface $interface of session $session is not a valid source interface\n"
           if ( $type eq 'src' && $intf->type() ne 'dataplane' );
         die
-"Hardware interface $interface of session $session is not a valid destination interface\n"
+          "Hardware interface $interface of session $session is not a valid destination interface\n"
           if ( $type eq 'dst'
             && ( $intf->type() ne 'dataplane' && $intf->type() ne 'bonding' ) );
     }
     else {
-        die
-"Interface $interface of session $session is not a valid $type interface\n"
+        die "Interface $interface of session $session is not a valid $type interface\n"
           if ( $intf->type() ne 'dataplane' && $intf->type() ne 'vhost' );
     }
-    my $config = new Vyatta::Config( $intf->path() );
+    my $config = Vyatta::Config->new( $intf->path() );
     my $bond   = $config->returnValue("bond-group");
     die
 "Invalid dataplane interface: $interface of session $session is a slave of a bonding interface\n"
       if ( $intf->type() eq 'dataplane' && defined($bond) );
+    return;
 }
 
 sub get_intf_config {
     my ($intf) = @_;
-    my $if     = new Vyatta::Interface($intf);
+    my $if     = Vyatta::Interface->new($intf);
     my $cfg    = $dpconfig;
 
     if ( $if->type() eq 'vhost' ) {
@@ -240,9 +232,10 @@ sub check_valid_vif {
     die "Invalid vif $vif for interface $intf of session $session\n"
       unless ( $config->exists("$intf vif $vif") );
 
-    my $int = new Vyatta::Interface( $intf.$vif );
+    my $int = Vyatta::Interface->new("$intf.$vif");
     die "Unknown interface name/type: $intf.$vif\n"
       unless defined($int);
+    return;
 }
 
 sub check_mandatory_unchanging_nodes {
@@ -256,30 +249,25 @@ sub check_mandatory_unchanging_nodes {
       if ( defined($origtype) && $type ne $origtype );
 
     if ( $type eq 'erspan-source' || $type eq 'erspan-destination' ) {
-        my $erspanid =
-          $pmconfig->returnValue("session $session erspan identifier");
-        my $erspanhdr =
-          $pmconfig->returnValue("session $session erspan header");
+        my $erspanid  = $pmconfig->returnValue("session $session erspan identifier");
+        my $erspanhdr = $pmconfig->returnValue("session $session erspan header");
 
         die "For erspan portmonitor sessions, erspan identifier is mandatory\n"
           unless defined($erspanid);
 
-        my $origerspanid =
-          $pmconfig->returnOrigValue("session $session erspan identifier");
-        die
-"Changing the identifier of the portmonitor session of type erspan is not allowed\n"
+        my $origerspanid = $pmconfig->returnOrigValue("session $session erspan identifier");
+        die "Changing the identifier of the portmonitor session of type erspan is not allowed\n"
           if ( defined($origerspanid) && $erspanid ne $origerspanid );
-        my $origerspanhdr =
-          $pmconfig->returnOrigValue("session $session erspan header");
-        die
-"Changing the header-type of the portmonitor session of type erspan is not allowed\n"
+        my $origerspanhdr = $pmconfig->returnOrigValue("session $session erspan header");
+        die "Changing the header-type of the portmonitor session of type erspan is not allowed\n"
           if ( defined($origerspanhdr) && $erspanhdr ne $origerspanhdr );
     }
+    return;
 }
 
 sub check_valid_source_interface {
     my ( $session, $type, $srcinput, $direction ) = @_;
-    my ( $source, $vif ) = split /\./, $srcinput;
+    my ( $source, $vif ) = split /[.]/x, $srcinput;
     check_valid_dp_intf( $session, $source, 'src' );
 
     my $existssrc = $pmconfig->exists("session $session source $source");
@@ -292,21 +280,13 @@ sub check_valid_source_interface {
 
     if ( $type eq 'rspan-destination' ) {
         die
-"Only one source interface is allowed for session $session of type 'rspan-destination'\n"
+          "Only one source interface is allowed for session $session of type 'rspan-destination'\n"
           if ( 1 < @sourceintfs );
 
         die
 "Setting the direction for source interface of session $session having type 'rspan-destination' is not allowed\n"
-          if (
-            defined(
-                $pmconfig->exists(
-                    "session $session source $srcinput direction")
-            )
-            && !defined(
-                $pmconfig->isDefault(
-                    "session $session source $srcinput direction")
-            )
-          );
+          if ( defined( $pmconfig->exists("session $session source $srcinput direction") )
+            && !defined( $pmconfig->isDefault("session $session source $srcinput direction") ) );
     }
 
     if ( defined($vif) ) {
@@ -315,8 +295,7 @@ sub check_valid_source_interface {
         check_valid_vif( $config, $session, $source, $vif );
         check_vif_already_configured( $session, $srcinput );
 
-        my $bridge =
-          $config->returnValue("$source vif $vif bridge-group bridge");
+        my $bridge = $config->returnValue("$source vif $vif bridge-group bridge");
         die
 "Interface $srcinput for portmonitor of type 'rspan-destination' needs to be part of bridge-group\n"
           if ( !defined($bridge) && $type eq 'rspan-destination' );
@@ -335,20 +314,74 @@ sub check_valid_source_interface {
     }
 
     check_platform_allowed_hw_source( $session, $source, $direction, $type );
+    return;
+}
+
+# Dies unless every ip and ipv6 attribute under $node is at its default.
+sub check_no_ip_attributes {
+    my ( $config, $node, $name ) = @_;
+    foreach my $family (qw(ip ipv6)) {
+        foreach my $property ( $config->listNodes("$node $family") ) {
+            die "Destination interface $name for portmonitor cannot have any $family attributes\n"
+              unless $config->isDefault("$node $family $property");
+        }
+    }
+    return;
+}
+
+sub check_vif_destination {
+    my ( $config, $session, $destination, $vif ) = @_;
+    my $keyintf = "$destination.$vif";
+    my $node    = "$destination vif $vif";
+
+    check_valid_vif( $config, $session, $destination, $vif );
+    die "Destination interface $keyintf for portmonitor is disabled\n"
+      if ( defined( $config->exists("$node disable") ) );
+    die "Destination interface $keyintf for portmonitor cannot be part of bridge-group\n"
+      if ( defined( $config->exists("$node bridge-group bridge") ) );
+    die "Destination interface $keyintf for portmonitor cannot have address configured\n"
+      if ( defined( $config->exists("$node address") ) );
+    check_no_ip_attributes( $config, $node, $keyintf );
+
+    check_vif_already_configured( $session, $keyintf );
+    $vifdests{$keyintf}          = undef;
+    $vifwithoutvid{$destination} = undef;
+    return;
+}
+
+sub check_phy_destination {
+    my ( $config, $session, $destination ) = @_;
+
+    die "Destination interface $destination for portmonitor is disabled\n"
+      if ( defined( $config->exists("$destination disable") ) );
+    die "Destination interface $destination for portmonitor cannot be part of bridge-group\n"
+      if ( defined( $config->exists("$destination bridge-group bridge") ) );
+    die "Destination interface $destination for portmonitor cannot be part of switch-group\n"
+      if ( defined( $config->exists("$destination switch-group switch") ) );
+    die
+"Destination interface $destination for portmonitor cannot have address or qos-policy configured\n"
+      if ( defined( $config->exists("$destination address") )
+        || defined( $config->exists("$destination qos-policy") ) );
+    check_no_ip_attributes( $config, $destination, $destination );
+
+    die
+"Interface $destination for session $session is already configured as vif interface for same or another session\n"
+      if exists $vifwithoutvid{$destination};
+
+    $phydests{$destination} = undef;
+    return;
 }
 
 sub check_valid_destination_interface {
     my ( $session, $type, $destinput ) = @_;
-    my ( $destination, $vif ) = split /\./, $destinput;
+    my ( $destination, $vif ) = split /[.]/x, $destinput;
     my $config = get_intf_config($destination);
 
     check_valid_dp_intf( $session, $destination, 'dst' );
 
-    die
-"vif for interface $destination of type rspan-source for session $session is not defined\n"
+    die "vif for interface $destination of type rspan-source for session $session is not defined\n"
       if ( !defined($vif) && $type eq 'rspan-source' );
-    die
-"Invalid destination interface $destinput for session $session, needs to be physical\n"
+    die "Invalid destination interface $destinput for session $session, needs to be physical\n"
       if (
         defined($vif)
         && (   $type eq 'span'
@@ -359,87 +392,120 @@ sub check_valid_destination_interface {
     check_phyintf_already_configured( $session, $destination );
 
     if ( defined($vif) ) {
-        check_valid_vif( $config, $session, $destination, $vif );
-        my $keyintf = $destination . '.' . $vif;
-
-        die "Destination interface $destinput for portmonitor is disabled\n"
-          if ( defined( $config->exists("$destination vif $vif disable") ) );
-        die
-"Destination interface $destinput for portmonitor cannot be part of bridge-group\n"
-          if (
-            defined(
-                $config->exists("$destination vif $vif bridge-group bridge")
-            )
-          );
-        die
-"Destination interface $destinput for portmonitor cannot have address configured\n"
-          if ( defined( $config->exists("$destination vif $vif address") ) );
-
-        my @ip_properties = $config->listNodes("$destination vif $vif ip");
-        foreach my $property (@ip_properties) {
-            die
-"Destination interface $keyintf for portmonitor cannot have any ip attributes\n"
-              unless $config->isDefault("$destination vif $vif ip $property");
-        }
-        my @ipv6_properties = $config->listNodes("$destination vif $vif ipv6");
-        foreach my $property (@ipv6_properties) {
-            die
-"Destination interface $keyintf for portmonitor cannot have any ipv6 attributes\n"
-              unless $config->isDefault("$destination vif $vif ipv6 $property");
-        }
-
-        check_vif_already_configured( $session, $keyintf );
-        $vifdests{$keyintf}          = undef;
-        $vifwithoutvid{$destination} = undef;
+        check_vif_destination( $config, $session, $destination, $vif );
     }
     else {
-        die "Destination interface $destination for portmonitor is disabled\n"
-          if ( defined( $config->exists("$destination disable") ) );
-        die
-"Destination interface $destination for portmonitor cannot be part of bridge-group\n"
-          if ( defined( $config->exists("$destination bridge-group bridge") ) );
-        die
-"Destination interface $destination for portmonitor cannot be part of switch-group\n"
-          if ( defined( $config->exists("$destination switch-group switch") ) );
-        die
-"Destination interface $destination for portmonitor cannot have address or qos-policy configured\n"
-          if ( defined( $config->exists("$destination address") )
-            || defined( $config->exists("$destination qos-policy") ) );
-
-        my @ip_properties = $config->listNodes("$destination ip");
-        foreach my $property (@ip_properties) {
-            die
-"Destination interface $destination for portmonitor cannot have any ip attributes\n"
-              unless $config->isDefault("$destination ip $property");
-        }
-        my @ipv6_properties = $config->listNodes("$destination ipv6");
-        foreach my $property (@ipv6_properties) {
-            die
-"Destination interface $destination for portmonitor cannot have any ipv6 attributes\n"
-              unless $config->isDefault("$destination ipv6 $property");
-        }
-
-        die
-"Interface $destination for session $session is already configured as vif interface for same or another session\n"
-          if exists $vifwithoutvid{$destination};
-
-        $phydests{$destination} = undef;
+        check_phy_destination( $config, $session, $destination );
     }
 
-    my $hw_only = is_supported_platform_feature( "portmonitor.hardware-only",
-        undef, undef );
-    die
-"Hardware-switched destination interface $destination not supported on this platform\n"
+    my $hw_only = is_supported_platform_feature( "portmonitor.hardware-only", undef, undef );
+    die "Hardware-switched destination interface $destination not supported on this platform\n"
       if ( is_hw_interface($destination) && ( !$hw_only ) );
+    return;
 }
 
 sub check_valid_erspan_tunnel {
     my ( $session, $source ) = @_;
 
     my $erspantunnel = $erspanconfig->exists("$source");
-    die
-"Interface $source configured for session $session needs to be valid erspan tunnel\n"
+    die "Interface $source configured for session $session needs to be valid erspan tunnel\n"
       unless defined($erspantunnel);
+    return;
+}
+
+# The source tunnel of an erspan-destination session.
+sub check_erspan_destination_source {
+    my ( $session, $source ) = @_;
+
+    check_valid_erspan_tunnel( $session, $source );
+
+    my ( $srcif, $vif ) = split /[.]/x, $source;
+    die "Setting the vif for tunnel interface of session $session is an invalid configuration\n"
+      if ( defined($vif) );
+    my @tunnels = $pmconfig->listNodes("session $session source $source");
+    die
+"Only one source tunnel interface is allowed for session $session of type 'erspan-destination'\n"
+      if ( 1 < @tunnels );
+    die
+"Setting the direction for tunnel interface of session $session having type 'erspan-destination' is not allowed\n"
+      if ( defined( $pmconfig->exists("session $session source $source direction") )
+        && !$pmconfig->isDefault("session $session source $source direction") );
+    warn "Warning: Setting ttl on $source of session $session is not recommended\n"
+      if ( $erspanconfig->exists("$source ip ttl")
+        && ( !$erspanconfig->isDefault("$source ip ttl") ) );
+    warn "Warning: Setting tos on $source of session $session is not recommended\n"
+      if ( $erspanconfig->exists("$source ip tos")
+        && ( !$erspanconfig->isDefault("$source ip tos") ) );
+
+    $erspan_src_tunnels{$source} = undef;
+    return;
+}
+
+# The sources of a session.
+sub check_session_sources {
+    my ( $session, $type ) = @_;
+
+    my @sources = $pmconfig->listNodes("session $session source");
+    die "Only one source interface is allowed for session $session of type $type'\n"
+      if ( ( $type eq 'rspan-destination' || $type eq 'erspan-destination' )
+        && 1 < @sources );
+
+    foreach my $source (@sources) {
+        if ( $type eq 'erspan-destination' ) {
+            check_erspan_destination_source( $session, $source );
+        }
+        else {
+            my $direction = $pmconfig->returnValue("session $session source $source direction");
+
+            if ( !defined($direction) ) {
+                $direction = 'both';
+            }
+            check_valid_source_interface( $session, $type, $source, $direction );
+        }
+        die "Only 8 distinct source interfaces are allowed to configure\n"
+          if ( keys %physrcs ) + ( keys %vifsrcs ) + ( keys %erspan_src_tunnels ) >= 9;
+    }
+    return;
+}
+
+# The destinations of a session.
+sub check_session_destinations {
+    my ( $session, $type ) = @_;
+
+    my @destinations = $pmconfig->returnValues("session $session destination");
+    foreach my $destination (@destinations) {
+        if ( $type eq 'erspan-source' ) {
+            check_valid_erspan_tunnel( $session, $destination );
+            die "Destination interface $destination of portmonitor session $session is disabled\n"
+              if ( defined( $erspanconfig->exists("$destination disable") ) );
+            $erspan_dest_tunnels{$destination} = undef;
+        }
+        else {
+            check_valid_destination_interface( $session, $type, $destination );
+        }
+    }
+    return;
+}
+
+# Deleted sources and filters of a session.
+sub check_session_changes {
+    my ( $session, $type ) = @_;
+
+    my @delsources = $pmconfig->listDeleted("session $session source");
+    foreach my $delsource (@delsources) {
+        my $config = get_intf_config($delsource);
+
+        my ( $srcif, $vif ) = split /[.]/x, $delsource;
+        die "Cannot delete vif interface $delsource configured for portmonitor session $session\n"
+          if ( defined($vif) && !$config->exists("$srcif vif $vif") );
+    }
+
+    my @filters_in  = $pmconfig->returnValues("session $session filter in");
+    my @filters_out = $pmconfig->returnValues("session $session filter out");
+    die "Filters are not allowed for session $session of type $type'\n"
+      if ( ( $type eq 'rspan-destination' || $type eq 'erspan-destination' )
+        && ( @filters_in || @filters_out ) );
+    return;
 }
 
 #
@@ -453,96 +519,9 @@ foreach my $session ( $pmconfig->listNodes("session") ) {
 
     check_mandatory_unchanging_nodes( $session, $type );
 
-    my @sources = $pmconfig->listNodes("session $session source");
-    die
-"Only one source interface is allowed for session $session of type $type'\n"
-      if ( ( $type eq 'rspan-destination' || $type eq 'erspan-destination' )
-        && 1 < @sources );
-
-    foreach my $source (@sources) {
-        if ( $type eq 'erspan-destination' ) {
-            check_valid_erspan_tunnel( $session, $source );
-
-            my ( $srcif, $vif ) = split /\./, $source;
-            die
-"Setting the vif for tunnel interface of session $session is an invalid configuration\n"
-              if ( defined($vif) );
-            my @tunnels =
-              $pmconfig->listNodes("session $session source $source");
-            die
-"Only one source tunnel interface is allowed for session $session of type 'erspan-destination'\n"
-              if ( 1 < @tunnels );
-            die
-"Setting the direction for tunnel interface of session $session having type 'erspan-destination' is not allowed\n"
-              if (
-                defined(
-                    $pmconfig->exists(
-                        "session $session source $source direction")
-                )
-                && !$pmconfig->isDefault(
-                    "session $session source $source direction")
-              );
-            warn
-"Warning: Setting ttl on $source of session $session is not recommended\n"
-              if ( $erspanconfig->exists("$source ip ttl")
-                && ( !$erspanconfig->isDefault("$source ip ttl") ) );
-            warn
-"Warning: Setting tos on $source of session $session is not recommended\n"
-              if ( $erspanconfig->exists("$source ip tos")
-                && ( !$erspanconfig->isDefault("$source ip tos") ) );
-
-            $erspan_src_tunnels{$source} = undef;
-        }
-        else {
-            my $direction = $pmconfig->returnValue(
-                "session $session source $source direction");
-
-            if ( !defined($direction) ) {
-                $direction = 'both';
-            }
-            check_valid_source_interface( $session, $type, $source,
-                $direction );
-        }
-        die "Only 8 distinct source interfaces are allowed to configure\n"
-          unless (
-            (
-                ( keys %physrcs ) +
-                ( keys %vifsrcs ) +
-                ( keys %erspan_src_tunnels )
-            ) < 9
-          );
-    }
-
-    my @destinations = $pmconfig->returnValues("session $session destination");
-    foreach my $destination (@destinations) {
-        if ( $type eq 'erspan-source' ) {
-            check_valid_erspan_tunnel( $session, $destination );
-            die
-"Destination interface $destination of portmonitor session $session is disabled\n"
-              if ( defined( $erspanconfig->exists("$destination disable") ) );
-            $erspan_dest_tunnels{$destination} = undef;
-        }
-        else {
-            check_valid_destination_interface( $session, $type, $destination );
-        }
-    }
-
-    my @delsources = $pmconfig->listDeleted("session $session source");
-    foreach my $delsource (@delsources) {
-        my $config = get_intf_config($delsource);
-
-        my ( $srcif, $vif ) = split /\./, $delsource;
-        die
-"Cannot delete vif interface $delsource configured for portmonitor session $session\n"
-          if ( defined($vif) && !$config->exists("$srcif vif $vif") );
-    }
-
-    my @filters_in  = $pmconfig->returnValues("session $session filter in");
-    my @filters_out = $pmconfig->returnValues("session $session filter out");
-    die "Filters are not allowed for session $session of type $type'\n"
-      if ( ( $type eq 'rspan-destination' || $type eq 'erspan-destination' )
-        && ( @filters_in || @filters_out ) );
-
+    check_session_sources( $session, $type );
+    check_session_destinations( $session, $type );
+    check_session_changes( $session, $type );
 }
 
 exit 0;

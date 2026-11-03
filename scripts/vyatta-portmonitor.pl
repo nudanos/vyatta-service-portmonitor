@@ -35,8 +35,8 @@ my %header_type = (
     'type-III' => '2',
 );
 
-my $ctrl           = new Vyatta::VPlaned;
-my $config         = new Vyatta::Config("service portmonitor session");
+my $ctrl           = Vyatta::VPlaned->new();
+my $config         = Vyatta::Config->new("service portmonitor session");
 my $filter_updated = 0;
 
 # Prepare command in the following format
@@ -49,8 +49,10 @@ my $filter_updated = 0;
 #         - interface is the interface that the cfg is applied to. Used
 #           by the controller to force ordering of commands arriving at dataplane
 # Validations are already done, just perform actions
+# $words: [ key, value, param1, param2 ]
 sub send_cmd_to_controller {
-    my ( $action, $cskey, $sessionid, $key, $value, $param1, $param2, $interface ) = @_;
+    my ( $action, $cskey, $sessionid, $words, $interface ) = @_;
+    my ( $key, $value, $param1, $param2 ) = @{$words};
     my $cs_action = 'SET';
     $cs_action = 'DELETE'
       if ( $action eq 'del' );
@@ -60,19 +62,19 @@ sub send_cmd_to_controller {
         "portmonitor $action session $sessionid $key $value $param1 $param2",
         $interface, $cs_action
     );
+    return;
 }
 
 # disable is empty leaf, so it is either set or not present
 sub modify_disable {
     my ( $sessionid, $action ) = @_;
     if ( $action eq "del" ) {
-        send_cmd_to_controller( "del", "disable", $sessionid, "disable", 0, 0,
-            0 );
+        send_cmd_to_controller( "del", "disable", $sessionid, [ "disable", 0, 0, 0 ] );
     }
     elsif ( $action eq "set" ) {
-        send_cmd_to_controller( "set", "disable", $sessionid, "disable", 0, 0,
-            0 );
+        send_cmd_to_controller( "set", "disable", $sessionid, [ "disable", 0, 0, 0 ] );
     }
+    return;
 }
 
 sub modify_filters {
@@ -89,8 +91,9 @@ sub modify_filters {
     return if ( !defined($key) );
     foreach my $filter (@filters) {
         send_cmd_to_controller( $action, "filter $type $filter",
-            $sessionid, $key, $filter, 0, 0 );
+            $sessionid, [ $key, $filter, 0, 0 ] );
     }
+    return;
 }
 
 sub set_filters {
@@ -99,6 +102,7 @@ sub set_filters {
     my @filters_out = $config->returnValues("$sessionid filter out");
     modify_filters( "set", $sessionid, \@filters_in,  "in" )  if (@filters_in);
     modify_filters( "set", $sessionid, \@filters_out, "out" ) if (@filters_out);
+    return;
 }
 
 sub detach_filters_on_intf {
@@ -107,12 +111,12 @@ sub detach_filters_on_intf {
     foreach my $filter (@filters) {
         $filter_updated++ if ( $filter_updated == 0 );
         $ctrl->store(
-"service portmonitor session $sessionid __pmf_attach $intf $type $filter",
+            "service portmonitor session $sessionid __pmf_attach $intf $type $filter",
             "npf-cfg detach interface:$intf portmonitor-$type fw:$filter",
-            $intf,
-            "DELETE"
+            $intf, "DELETE"
         );
     }
+    return;
 }
 
 sub attach_filters_on_intf {
@@ -121,62 +125,59 @@ sub attach_filters_on_intf {
     foreach my $filter (@filters) {
         $filter_updated++ if ( $filter_updated == 0 );
         $ctrl->store(
-"service portmonitor session $sessionid __pmf_attach $intf $type $filter",
+            "service portmonitor session $sessionid __pmf_attach $intf $type $filter",
             "npf-cfg attach interface:$intf portmonitor-$type fw:$filter",
-            $intf,
-            "SET"
+            $intf, "SET"
         );
     }
+    return;
 }
 
 sub commit_filter_changes {
     $ctrl->store( "npf-cfg commit", "npf-cfg commit", undef, "SET" );
+    return;
 }
 
 sub modify_source_intf {
     my ( $action, $sessionid, $source ) = @_;
 
-    my ( $srcif, $vif ) = split /\./, $source;
+    my ( $srcif, $vif ) = split /[.]/x, $source;
     $vif = 0 unless defined($vif);
 
     my $direction = 0;
     if ( $action eq "set" ) {
-        $direction =
-          $config->returnValue("$sessionid source $source direction");
+        $direction = $config->returnValue("$sessionid source $source direction");
         $direction = $direction_type{$direction} if ( defined($direction) );
     }
 
     send_cmd_to_controller( $action, "source $source",
-        $sessionid, "srcif", $srcif, $vif, $direction, $srcif );
+        $sessionid, [ "srcif", $srcif, $vif, $direction ], $srcif );
 
-    my @rxvlans = $config->returnValues(
-        "$sessionid source $source vlan-parameters rx vlan-id");
-    my @origrxvlans = $config->returnOrigValues(
-        "$sessionid source $source vlan-parameters rx vlan-id");
+    my @rxvlans = $config->returnValues("$sessionid source $source vlan-parameters rx vlan-id");
+    my @origrxvlans =
+      $config->returnOrigValues("$sessionid source $source vlan-parameters rx vlan-id");
 
     if ( array_diff( @rxvlans, @origrxvlans ) ) {
         my $num = scalar @rxvlans;
         $ctrl->store(
             "service portmonitor session $sessionid source $srcif vlan rx",
-"portmonitor $action session $sessionid srcif $srcif vlan rx $num @rxvlans",
-            $srcif,
-            'SET'
+            "portmonitor $action session $sessionid srcif $srcif vlan rx $num @rxvlans",
+            $srcif, 'SET'
         );
     }
-    my @txvlans = $config->returnValues(
-        "$sessionid source $source vlan-parameters tx vlan-id");
-    my @origtxvlans = $config->returnOrigValues(
-        "$sessionid source $source vlan-parameters tx vlan-id");
+    my @txvlans = $config->returnValues("$sessionid source $source vlan-parameters tx vlan-id");
+    my @origtxvlans =
+      $config->returnOrigValues("$sessionid source $source vlan-parameters tx vlan-id");
 
     if ( array_diff( @txvlans, @origtxvlans ) ) {
         my $num = scalar @txvlans;
         $ctrl->store(
             "service portmonitor session $sessionid source $srcif vlan tx",
-"portmonitor $action session $sessionid srcif $srcif vlan tx $num @txvlans",
-            $srcif,
-            'SET'
+            "portmonitor $action session $sessionid srcif $srcif vlan tx $num @txvlans",
+            $srcif, 'SET'
         );
     }
+    return;
 }
 
 sub is_source_session {
@@ -205,14 +206,16 @@ sub set_sources {
         attach_filters_on_intf( $sessionid, $source, \@filters_out, "out" )
           if (@filters_out);
     }
+    return;
 }
 
 sub modify_destination {
     my ( $action, $sessionid, $destination ) = @_;
-    my ( $dstif, $vif ) = split /\./, $destination;
+    my ( $dstif, $vif ) = split /[.]/x, $destination;
     $vif = 0 unless defined($vif);
-    send_cmd_to_controller( $action, "destination", $sessionid, "dstif", $dstif,
-        $vif, 0, $dstif);
+    send_cmd_to_controller( $action, "destination", $sessionid,
+        [ "dstif", $dstif, $vif, 0 ], $dstif );
+    return;
 }
 
 sub set_destinations {
@@ -221,6 +224,7 @@ sub set_destinations {
     foreach my $destination (@destinations) {
         modify_destination( "set", $sessionid, $destination );
     }
+    return;
 }
 
 sub set_session {
@@ -228,19 +232,17 @@ sub set_session {
 
     # Type is mandatory, and cannot be changed. So only set, no delete or change
     my $type = $config->returnValue("$sessionid type");
-    send_cmd_to_controller( "set", "type", $sessionid, "type",
-        $session_type{$type}, 0, 0 );
+    send_cmd_to_controller( "set", "type", $sessionid, [ "type", $session_type{$type}, 0, 0 ] );
 
     # erspan header-type and identifier are mandatory for erspan session types,
     # and cannot be changed. So only set, no delete or change.
     if ( $type eq 'erspan-source' || $type eq 'erspan-destination' ) {
-        my $identifier = $config->returnValue("$sessionid erspan identifier");
-        my $header_type =
-          $header_type{ $config->returnValue("$sessionid erspan header") };
+        my $identifier  = $config->returnValue("$sessionid erspan identifier");
+        my $header_type = $header_type{ $config->returnValue("$sessionid erspan header") };
         send_cmd_to_controller( "set", "erspan identifier",
-            $sessionid, "erspanid", $identifier, 0, 0 );
+            $sessionid, [ "erspanid", $identifier, 0, 0 ] );
         send_cmd_to_controller( "set", "erspan header",
-            $sessionid, "erspanhdr", $header_type, 0, 0 );
+            $sessionid, [ "erspanhdr", $header_type, 0, 0 ] );
     }
 
     if ( $config->exists("$sessionid disable") ) {
@@ -250,6 +252,7 @@ sub set_session {
     set_filters($sessionid) if ( is_source_session($sessionid) );
     set_sources($sessionid);
     set_destinations($sessionid);
+    return;
 }
 
 sub change_sources {
@@ -282,6 +285,7 @@ sub change_sources {
             modify_source_intf( "set", $sessionid, $source );
         }
     }
+    return;
 }
 
 sub change_destinations {
@@ -299,6 +303,7 @@ sub change_destinations {
             modify_destination( "set", $sessionid, $destination );
         }
     }
+    return;
 }
 
 sub change_disable {
@@ -309,6 +314,7 @@ sub change_disable {
     elsif ( $config->isDeleted("$sessionid disable") ) {
         modify_disable( $sessionid, "del" );
     }
+    return;
 }
 
 sub change_filters {
@@ -351,11 +357,11 @@ sub change_filters {
       if (@newfilters_in);
     modify_filters( "set", $sessionid, \@newfilters_out, "out" )
       if (@newfilters_out);
+    return;
 }
 
 sub detach_all_filters {
     my ($sessionid) = @_;
-    my $commit      = 0;
     my @filters_in  = $config->listDeleted("$sessionid filter in");
     my @filters_out = $config->listDeleted("$sessionid filter out");
     my @sources     = $config->listDeleted("$sessionid source");
@@ -365,6 +371,7 @@ sub detach_all_filters {
         detach_filters_on_intf( $sessionid, $source, \@filters_out, "out" )
           if (@filters_out);
     }
+    return;
 }
 
 sub change_session {
@@ -373,6 +380,7 @@ sub change_session {
     change_sources($sessionid);
     change_destinations($sessionid);
     change_filters($sessionid) if ( is_source_session($sessionid) );
+    return;
 }
 
 sub update_portmonitor {
@@ -382,7 +390,7 @@ sub update_portmonitor {
     # Delete session - dataplane code only needs session id to delete session
     foreach my $delsession (@delsessions) {
         detach_all_filters($delsession);
-        send_cmd_to_controller( "del", "", $delsession, 0, 0, 0, 0 );
+        send_cmd_to_controller( "del", "", $delsession, [ 0, 0, 0, 0 ] );
     }
 
     foreach my $session (@sessions) {
@@ -394,26 +402,28 @@ sub update_portmonitor {
         }
     }
     commit_filter_changes() if ( $filter_updated > 0 );
+    return;
 }
 
 sub show_allowed_portmonitor_intf {
-    return unless eval 'use Vyatta::SwitchConfig qw(is_hw_interface); 1';
+    return unless eval { require Vyatta::SwitchConfig; 1 };
 
     my @interfaces = Vyatta::Misc::getInterfaces();
     my @match;
 
     foreach my $name (@interfaces) {
-        my $intf = new Vyatta::Interface($name);
+        my $intf = Vyatta::Interface->new($name);
         next unless $intf;
         next
           unless ( $intf->type() eq 'dataplane'
             || $intf->type() eq 'erspan'
             || $intf->type() eq 'bonding'
             || $intf->type() eq 'vhost' );
-        next unless ( !is_hw_interface($name) );
+        next if Vyatta::SwitchConfig::is_hw_interface($name);
         push @match, $name;
     }
     print join( ' ', @match ), "\n";
+    return;
 }
 
 #

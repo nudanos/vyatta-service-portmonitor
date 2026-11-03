@@ -5,3 +5,8 @@
 
 %:
 	dh $@ --with yang
+
+override_dh_auto_test:
+ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
+	prove t/
+endif
